@@ -18,7 +18,7 @@ The resulting binary can be found at build/max32625_if.bin
 
 The Power Monitor MCU contains a USB bootloader that will accept the firmware binary via a virtual USB flash drive.  To activate the bootloader connect the EVKIT to your PC via the J1 USB port (right side of the board) and CN1 (top side of the board).  Power off the board via SW1.  Press and hold SW6 on the EVKIT and then apply power via SW1.  The Power Monitor LED (D4) will turn blue and your computer should enumerate a virtual flash drive called "MAINTENANCE'.
 
-Copy max32625_if.bin onto the drive.  The LED will flash during programming and complete within a few seconds.  Once programming is complete the virtual flash drive will disapper and the Power Monitor firmware will run automatically.
+Copy max32625_if.bin onto the drive.  The LED will flash during programming and complete within a few seconds.  Once programming is complete the virtual flash drive will disappear and the Power Monitor firmware will run automatically.
 
 #### Usage
 
@@ -29,6 +29,6 @@ Copy max32625_if.bin onto the drive.  The LED will flash during programming and 
     * 'w' - power mode
     * 't' - triggered mode
 
-All modes emit full-precision version of the data displayed on the LCD.  Units aren't emitted, but are consistant with the LCD.  Labels aren't emitted but the CSV values are in the same order as is displayed on the LCD.  Units and labels are static.
+All modes emit full-precision version of the data displayed on the LCD.  Units are not emitted, but are consistent with the LCD.  Labels are not emitted but the CSV values are in the same order as is displayed on the LCD.  Units and labels are static.
 
 
