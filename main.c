@@ -41,7 +41,6 @@
 #include "lcd.h"
 #include "ugui.h"
 #include "logo.xbm"
-#include "Led.h"
 #include "tmr.h"
 
 #include "usb.h"
