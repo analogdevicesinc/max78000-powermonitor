@@ -55,7 +55,7 @@ endif
 
 # This is the path to the CMSIS root directory
 ifeq "$(MAXIM_PATH)" ""
-LIBS_DIR=../../../Libraries
+LIBS_DIR=Libraries
 else
 LIBS_DIR=/$(subst \,/,$(subst :,,$(MAXIM_PATH))/Firmware/$(TARGET_UC)/Libraries)
 endif
@@ -112,7 +112,6 @@ include $(PERIPH_DRIVER_DIR)/periphdriver.mk
 
 MAXUSB_DIR=$(LIBS_DIR)/MAXUSB
 include $(MAXUSB_DIR)/maxusb.mk
-
 ################################################################################
 # Include the rules for building for this target. All other makefiles should be
 # included before this one.
