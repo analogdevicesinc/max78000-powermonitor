@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2020 Maxim Integrated Products, Inc., All Rights Reserved.
+ * Copyright (C) 2020-2022 Maxim Integrated Products, Inc., All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -34,34 +34,44 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
+#include <ctype.h>
 #include "mxc_config.h"
 #include "led.h"
 #include "tmr_utils.h"
 #include "max34417.h"
 #include "lcd.h"
 #include "ugui.h"
-#include "logo.xbm"
+#if defined(MAX78002EVKIT)
+#include "logo-rot90.xbm"
+#else
+#include "logo-bitswap.xbm"
+#endif
 #include "tmr.h"
-
 #include "usb.h"
 #include "usb_event.h"
 #include "enumerate.h"
 #include "cdc_acm.h"
 #include "descriptors.h"
 #include "pwrman_regs.h"
-#include <ctype.h>
 
-#define POLL_PERIOD_MS      1
-#define UPDATE_PERIOD_MS    500/POLL_PERIOD_MS
+#define PM_VERSION "2.0"
+
+#define POLL_PERIOD_MS   1
+#define UPDATE_PERIOD_MS (1000 / POLL_PERIOD_MS)
 
 #define LEFT_COL  1
 #define TOP_ROW   2
 #define ROW_SPACE 20
 #define ROW(n) (TOP_ROW + (ROW_SPACE * (n)))
 
-#define AI_DEV "PMON 1.4"
+enum {
+    DDB_IDX = 0,    // 3V3
+    COREA_IDX,
+    COREB_IDX,
+    REGA_IDX        // 1V8
+};
 
-typedef enum {STATE_V, STATE_IP, STATE_AP, STATE_TRIG_CNN, STATE_TRIG_SYSTEM } state_t;
+typedef enum { STATE_V, STATE_IP, STATE_AP, STATE_TRIG_CNN, STATE_TRIG_SYSTEM, STATE_INFO } state_t;
 
 static const gpio_cfg_t gpio_cfg_trig =
 {
@@ -86,21 +96,22 @@ trig_state_t;
 volatile unsigned int event_flags;
 
 static const acm_cfg_t acm_cfg = {
-    1,                  /* EP OUT */
-    MXC_USB_MAX_PACKET, /* OUT max packet size */
-    2,                  /* EP IN */
-    MXC_USB_MAX_PACKET, /* IN max packet size */
-    3,                  /* EP Notify */
-    MXC_USB_MAX_PACKET, /* Notify max packet size */
+    .out_ep = 1,
+    .out_maxpacket = MXC_USB_MAX_PACKET,
+    .in_ep = 2,
+    .in_maxpacket = MXC_USB_MAX_PACKET,
+    .notify_ep = 3,
+    .notify_maxpacket = MXC_USB_MAX_PACKET,
 };
 
 static UG_GUI gui;
 static char txt_buf[16];
 
+static const char version_info[] = "\r\nPMON " PM_VERSION " " __TIMESTAMP__ " FOR " AI_DEVICE "\r\n\r\n";
+
 static void print_right_justified( double v, uint8_t row )
 {
-    sprintf( txt_buf, "%.2f", v );
-    int l = strlen( txt_buf );
+    int l = sprintf( txt_buf, "%7.2f", v );
     UG_PutString( gui.x_dim - 2 - l * gui.font.char_width, ROW( row + 2 ), txt_buf );
 }
 
@@ -112,26 +123,23 @@ static void print_centered( const char * txt, uint8_t row )
 
 void show_volts( bool redraw )
 {
-    double voltage[4];
+    double voltage[4], unused[4];
     int i;
 
     if( redraw )
     {
         lcd_clear();
-        UG_PutString( LEFT_COL + 13, ROW( 0 ), AI_DEV );
+        print_centered( "PMON", 0 );
         print_centered( "SUPPLY V", 1 );
-        UG_PutString( LEFT_COL, ROW( 2 ), "DDB" );
+        UG_PutString( LEFT_COL, ROW( 2 ), "3V3" );
         UG_PutString( LEFT_COL, ROW( 3 ), "CA" );
         UG_PutString( LEFT_COL, ROW( 4 ), "CB" );
-        UG_PutString( LEFT_COL, ROW( 5 ), "RA" );
+        UG_PutString( LEFT_COL, ROW( 5 ), "1V8" );
     }
 
-    if( !max34417_bulk_voltage( voltage ) )
-    {
-        // need to update lcd with error msg
-        printf( "show_volts() failed to read power monitor\n" );
-        return;
-    }
+    max34417_bulk_voltage( voltage );
+    max34417_bulk_power( unused );
+
     for( i = 0; i < 4; i++ )
     {
         if( acm_present() )
@@ -154,11 +162,17 @@ void show_volts( bool redraw )
 static void compensated_power( double power[4] )
 {
     uint8_t i;
-    static const double scale_and_comp = 2.24525201657553590785e-5; //2.247483130902358e-05; // converts raw power figure to mW
+    static const double scale_and_comp = 2.24525201657553590785e-5; // converts raw power figure to mW
+
     max34417_bulk_power( power );
     for( i = 0; i < 4; i++ )
     {
-        power[i] *= scale_and_comp; // scale and comp to mW
+        power[i] *= scale_and_comp; // scale and comp to mW; applies to all channels
+#if defined(MAX78002EVKIT)
+        /* compensate for 10mOhm shunt on 3V3 and CA; indicies 0 and 1 above the MAX34417 driver */
+        if (i < 2)
+            power[i] *= 10.0;
+#endif
     }
 }
 
@@ -170,18 +184,16 @@ void show_avg_power( bool redraw )
     if( redraw )
     {
         lcd_clear();
-        UG_PutString( LEFT_COL + 13, ROW( 0 ), AI_DEV );
+        print_centered( "PMON", 0 );
         print_centered( "AVG PWR mW", 1 );
-        UG_PutString( LEFT_COL, ROW( 2 ), "DDB" );
+        UG_PutString( LEFT_COL, ROW( 2 ), "3V3" );
         UG_PutString( LEFT_COL, ROW( 3 ), "CA" );
         UG_PutString( LEFT_COL, ROW( 4 ), "CB" );
-        UG_PutString( LEFT_COL, ROW( 5 ), "RA" );
-
-        //  memset(acc, 0, sizeof(acc));
-        //  cnt = 0;
+        UG_PutString( LEFT_COL, ROW( 5 ), "1V8" );
     }
 
     compensated_power( power );
+
     for( i = 0; i < 4; i++ )
     {
         if( acm_present() )
@@ -201,7 +213,6 @@ void show_avg_power( bool redraw )
     }
 }
 
-
 void show_inst_current( bool redraw )
 {
     double voltage[4], power[4];
@@ -210,20 +221,17 @@ void show_inst_current( bool redraw )
     if( redraw )
     {
         lcd_clear();
-        UG_PutString( LEFT_COL + 13, ROW( 0 ), AI_DEV );
+        print_centered( "PMON", 0 );
         print_centered( "CURRENT mA", 1 );
-        UG_PutString( LEFT_COL, ROW( 2 ), "DDB" );
+        UG_PutString( LEFT_COL, ROW( 2 ), "3V3" );
         UG_PutString( LEFT_COL, ROW( 3 ), "CA" );
         UG_PutString( LEFT_COL, ROW( 4 ), "CB" );
-        UG_PutString( LEFT_COL, ROW( 5 ), "RA" );
+        UG_PutString( LEFT_COL, ROW( 5 ), "1V8" );
     }
-    if( !max34417_bulk_voltage( voltage ) )
-    {
-        // need to update lcd with error msg
-        printf( "show_volts() failed to read power monitor\n" );
-        return;
-    }
+
+	max34417_bulk_voltage( voltage );
     compensated_power( power );
+
     for( i = 0; i < 4; i++ )
     {
         double current;
@@ -231,6 +239,7 @@ void show_inst_current( bool redraw )
             current = power[i] / voltage[i];
         else
             current = 0;
+
         if( acm_present() )
         {
             sprintf( txt_buf, "%g", current / 1000.0 );
@@ -251,7 +260,7 @@ void show_inst_current( bool redraw )
 static void enter_system_power_mode( void )
 {
     lcd_clear();
-    UG_PutString( LEFT_COL + 13, ROW( 0 ), AI_DEV );
+    print_centered( "PMON", 0 );
     print_centered( "SYSTEM", 2 );
     print_centered( "POWER", 3 );
     print_centered( "MODE", 4 );
@@ -261,7 +270,7 @@ static void enter_system_power_mode( void )
 static void enter_cnn_power_mode( void )
 {
     lcd_clear();
-    UG_PutString( LEFT_COL + 13, ROW( 0 ), AI_DEV );
+    print_centered( "PMON", 0 );
     print_centered( "CNN", 2 );
     print_centered( "POWER", 3 );
     print_centered( "MODE", 4 );
@@ -274,13 +283,13 @@ trig_state_t trig_state( void )
     static trig_state_t last_trig_state = trig_state_host_reset;
 
     uint32_t gpio = GPIO_InGet( &gpio_cfg_trig );
-    if( !gpio )
+
+    if( !gpio ) /* Both trigger inputs are active */
     {
         last_trig_state = ts = trig_state_host_reset;
     }
-    else if( gpio == PIN_3 )
+    else if( gpio == PIN_3 ) /* TRIG1/IDLE/PIN_2 is active and TRIG2/ACTIVE/PIN_3 is inactive */
     {
-
         if( last_trig_state == trig_state_measure_idle )
         {
             ts = trig_state_unchanged;
@@ -290,10 +299,11 @@ trig_state_t trig_state( void )
             last_trig_state = ts = trig_state_measure_idle;
         }
     }
-    else if( gpio == PIN_2 )
+    else if( gpio == PIN_2 ) /* TRIG2/ACTIVE/PIN_3 is active and TRIG1/IDLE/PIN_2 is inactive */
     {
         if( last_trig_state == trig_state_host_reset )
             return trig_state_host_reset;
+
         if( last_trig_state == trig_state_measure_active )
         {
             ts = trig_state_unchanged;
@@ -313,7 +323,6 @@ trig_state_t trig_state( void )
         {
             last_trig_state = ts = trig_state_measure_active_done;
         }
-
     }
     else if( last_trig_state == trig_state_measure_idle )
     {
@@ -327,7 +336,9 @@ trig_state_t trig_state( void )
         }
     }
     else
+    {
         last_trig_state = ts = trig_state_host_idle;
+    }
     return ts;
 }
 
@@ -499,18 +510,38 @@ static void init_usb( void )
 
 static void show_power_review_page( double active_power, double idle_power, double time )
 {
-    UG_PutString( LEFT_COL + 13, ROW( 0 ), AI_DEV );
-    sprintf( txt_buf, "E %5.0f uJ", (active_power - idle_power) * time * 1000.0 );
+    print_centered( "PMON", 0 );
+
+    double e = (active_power - idle_power) * time;
+    sprintf( txt_buf, "E %5.0f %cJ",
+             (e < 1000.0) ? e * 1000.0 : e,
+             (e < 1000.0) ? 'u' : 'm' );
     UG_PutString( LEFT_COL, ROW( 2 ), txt_buf );
-    sprintf( txt_buf, "T %5.1f ms", time * 1000.0 );
+    sprintf( txt_buf, "T %5.1f %cs",
+             (time < 0.001) ? time * 1000000.0 : time * 1000.0,
+             (time < 0.001) ? 'u' : 'm' );
     UG_PutString( LEFT_COL, ROW( 3 ), txt_buf );
-    sprintf( txt_buf, "I %5.2f mW", idle_power );
+    sprintf( txt_buf, "I %5.1f mW", idle_power );
     UG_PutString( LEFT_COL, ROW( 4 ), txt_buf );
-    sprintf( txt_buf, "A %5.2f mW", active_power );
+    sprintf( txt_buf, "A %5.1f mW", active_power );
     UG_PutString( LEFT_COL, ROW( 5 ), txt_buf );
     lcd_update();
-
 }
+
+static void show_info_page( bool redraw )
+{
+    if( redraw )
+    {
+        lcd_clear();
+        sprintf( txt_buf, "PMON %s", PM_VERSION );
+        print_centered( txt_buf, 1 );
+        print_centered( "for", 2 );
+        print_centered( AI_DEVICE, 3 );
+        print_centered( "EV KIT", 4 );
+        lcd_update();
+    }
+}
+
 int main( void )
 {
     static uint8_t power_review_mode = 0;
@@ -562,7 +593,6 @@ int main( void )
 
     for(;;)
     {
-        // 4Hz screen update, if count in ms.
         trig_state_t ts = trig_state();
         if( state != STATE_TRIG_CNN && state != STATE_TRIG_SYSTEM )
         {
@@ -570,6 +600,7 @@ int main( void )
             if( count++ >= UPDATE_PERIOD_MS )
             {
                 max34417_update();
+                TMR_Delay( MXC_TMR0, MSEC( 1 ) );
                 count = 0;
                 switch (state)
                 {
@@ -581,6 +612,9 @@ int main( void )
                         break;
                     case STATE_AP:
                         show_avg_power( state != prev_state );
+                        break;
+                    case STATE_INFO:
+                        show_info_page( state != prev_state );
                         break;
                     default:
                         break;
@@ -596,10 +630,10 @@ int main( void )
             {
                 max34417_update();
                 lcd_clear();
-                UG_PutString( LEFT_COL + 13, ROW( 0 ), AI_DEV );
+                print_centered( "PMON", 0 );
                 print_centered( "MEASURING", 2 );
-                print_centered( "IDLE", 3 );
-                print_centered( "POWER", 4 );
+                print_centered( "POWER", 3 );
+                print_centered( "STATES", 4 );
                 lcd_update();
                 active_phase = 0;
                 power_review_update = 0;
@@ -608,31 +642,8 @@ int main( void )
             {
                 max34417_update();
                 TMR32_SetCount( MXC_TMR1, 0 );
-                lcd_clear();
-                UG_PutString( LEFT_COL + 13, ROW( 0 ), AI_DEV );
-                switch (active_phase)
-                {
-                    case 0:
-                    {
-                        print_centered( "KERNEL", 2 );
-                        print_centered( "LOADING", 3 );
-                        break;
-                    }
-                    case 1:
-                    {
-                        print_centered( "INPUT", 2 );
-                        print_centered( "LOADING", 3 );
-                        break;
-                    }
-                    case 2:
-                    {
-                        print_centered( "INPUT AND", 2 );
-                        print_centered( "INFERENCE", 3 );
-                        break;
-                    }
-                }
-                print_centered( "POWER", 4 );
-                lcd_update();
+                TMR32_SetCompare( MXC_TMR1, 0xFFFFFFFF);
+                TMR32_ClearFlag( MXC_TMR1 );
             }
             else if( ts == trig_state_measure_idle_done )
             {
@@ -642,10 +653,16 @@ int main( void )
             }
             else if( ts == trig_state_measure_active_done )
             {
-                time[active_phase] = (double)TMR32_GetCount( MXC_TMR1 ) / ((double)SystemCoreClock * 100.0);
+                uint32_t t = TMR32_GetCount( MXC_TMR1 );
                 max34417_update();
                 TMR_Delay( MXC_TMR0, MSEC( 1 ) );
                 compensated_power( active_power[active_phase] );
+
+                if ( TMR32_GetFlag( MXC_TMR1 ) )
+                    time[active_phase] = ((double)t + (double)UINT32_MAX) / ((double)SystemCoreClock * 100.0);
+                else
+                    time[active_phase] =  (double)t / ((double)SystemCoreClock * 100.0);
+
                 active_phase++;
                 if( active_phase > 2 )
                 {
@@ -660,21 +677,22 @@ int main( void )
                     {
                         for( uint8_t i = 0; i < 3; i++ )
                         {
-                            sprintf( txt_buf, "%g,", (active_power[i][1] - idle_power[1]) * time[i] / 1000.0 );
+                            sprintf( txt_buf, "%g,", (active_power[i][COREA_IDX] - idle_power[COREA_IDX]) * time[i] / 1000.0 );
                             acm_write( (uint8_t*)txt_buf, strlen( txt_buf ) );
                             sprintf( txt_buf, "%g,", time[i] );
                             acm_write( (uint8_t*)txt_buf, strlen( txt_buf ) );
-                            sprintf( txt_buf, "%g,", idle_power[1] / 1000.0 );
+                            sprintf( txt_buf, "%g,", idle_power[COREA_IDX] / 1000.0 );
                             acm_write( (uint8_t*)txt_buf, strlen( txt_buf ) );
                             if( i == 2 )
-                                sprintf( txt_buf, "%g\r\n", active_power[i][1] / 1000.0 );
+                                sprintf( txt_buf, "%g\r\n", active_power[i][COREA_IDX] / 1000.0 );
                             else
-                                sprintf( txt_buf, "%g,", active_power[i][1] / 1000.0 );
+                                sprintf( txt_buf, "%g,", active_power[i][COREA_IDX] / 1000.0 );
                             acm_write( (uint8_t*)txt_buf, strlen( txt_buf ) );
                         }
                     }
                 }
             }
+
             if( power_review_mode && power_review_update )
             {
                 lcd_clear();
@@ -696,7 +714,7 @@ int main( void )
                         break;
                     }
                 }
-                show_power_review_page( active_power[power_review_page][1], idle_power[1], time[power_review_page] );
+                show_power_review_page( active_power[power_review_page][COREA_IDX], idle_power[COREA_IDX], time[power_review_page] );
                 power_review_update = 0;
             }
         }
@@ -707,7 +725,7 @@ int main( void )
                 max34417_update();
                 TMR32_SetCount( MXC_TMR1, 0 );
                 lcd_clear();
-                UG_PutString( LEFT_COL + 13, ROW( 0 ), AI_DEV );
+                print_centered( "PMON", 0 );
                 print_centered( "MEASURING", 2 );
                 print_centered( "SYSTEM", 3 );
                 print_centered( "POWER", 4 );
@@ -719,24 +737,30 @@ int main( void )
                 max34417_update();
                 TMR_Delay( MXC_TMR0, MSEC( 1 ) );
                 compensated_power( idle_power );
-                double time =  (double)t / (double)SystemCoreClock;
+                double time;
+
+                if( TMR32_GetFlag( MXC_TMR1 ) )
+                    time = ((double)t + (double)UINT32_MAX) / (double)SystemCoreClock;
+                else
+                    time = (double)t / (double)SystemCoreClock;
+
                 lcd_clear();
-                UG_PutString( LEFT_COL + 13, ROW( 0 ), AI_DEV );
+                print_centered( "PMON", 0 );
                 print_centered( "SYSTEM", 1 );
-                sprintf( txt_buf, "  %5.0f uJ", idle_power[1] * time * 1000.0 );
+                sprintf( txt_buf, "  %5.0f uJ", idle_power[COREA_IDX] * time * 1000.0 );
                 UG_PutString( LEFT_COL, ROW( 2 ), txt_buf );
                 sprintf( txt_buf, "  %5.1f ms", time * 1000.0 );
                 UG_PutString( LEFT_COL, ROW( 3 ), txt_buf );
-                sprintf( txt_buf, "  %5.2f mW", idle_power[1] );
+                sprintf( txt_buf, "  %5.2f mW", idle_power[COREA_IDX] );
                 UG_PutString( LEFT_COL, ROW( 4 ), txt_buf );
                 lcd_update();
                 if( acm_present() )
                 {
-                    sprintf( txt_buf, "%g,", idle_power[1] * time / 1000.0 );
+                    sprintf( txt_buf, "%g,", idle_power[COREA_IDX] * time / 1000.0 );
                     acm_write( (uint8_t*)txt_buf, strlen( txt_buf ) );
                     sprintf( txt_buf, "%g,", time );
                     acm_write( (uint8_t*)txt_buf, strlen( txt_buf ) );
-                    sprintf( txt_buf, "%g\r\n", idle_power[1] / 1000.0);
+                    sprintf( txt_buf, "%g\r\n", idle_power[COREA_IDX] / 1000.0);
                     acm_write( (uint8_t*)txt_buf, strlen( txt_buf )  );
                 }
             }
@@ -754,8 +778,7 @@ int main( void )
             {
                 case STATE_V:
                 {
-                    state = STATE_TRIG_SYSTEM;
-                    enter_system_power_mode();
+                    state = STATE_INFO;
                     break;
                 }
                 case STATE_TRIG_CNN:
@@ -777,6 +800,12 @@ int main( void )
                 case STATE_IP:
                 {
                     state = STATE_V;
+                    break;
+                }
+                case STATE_INFO:
+                {
+                    state = STATE_TRIG_SYSTEM;
+                    enter_system_power_mode();
                     break;
                 }
             }
@@ -823,6 +852,11 @@ int main( void )
                 case STATE_TRIG_SYSTEM:
                 {
                     prev_state = STATE_TRIG_SYSTEM;
+                    state = STATE_INFO;
+                    break;
+                }
+                case STATE_INFO:
+                {
                     state = STATE_V;
                     break;
                 }
@@ -867,6 +901,11 @@ int main( void )
                     {
                         enter_system_power_mode();
                         state = STATE_TRIG_SYSTEM;
+                        break;
+                    }
+                    case '\x16': // control-v
+                    {
+                        acm_write( (uint8_t*)version_info, strlen( version_info ) );
                         break;
                     }
                     default:

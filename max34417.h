@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2020 Maxim Integrated Products, Inc., All Rights Reserved.
+ * Copyright (C) 2020-2022 Maxim Integrated Products, Inc., All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -30,6 +30,9 @@
  * ownership rights.
  *
  ******************************************************************************/
+#ifndef _MAX34417_H_
+#define _MAX34417_H_
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -40,3 +43,4 @@ bool max34417_bulk_power( double power_raw[4] );
 bool max34417_bulk_energy( double energy_raw[4] );
 uint32_t max34417_acc_count( void );
 
+#endif

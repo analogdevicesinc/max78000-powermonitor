@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2020 Maxim Integrated Products, Inc., All Rights Reserved.
+ * Copyright (C) 2020-2022 Maxim Integrated Products, Inc., All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -37,10 +37,6 @@
 #include "tmr_utils.h"
 #include "max34417.h"
 
-#ifdef DUMP_RESPONSE
-#include <stdio.h>
-#endif
-
 #define MAX34417_I2CM       MXC_I2CM0
 #define MAX34417_I2CM_IDX   0
 #define MAX34417_I2CM_SPEED I2CM_SPEED_400KHZ
@@ -69,39 +65,38 @@
 static uint32_t convert_14to16( const uint8_t * p14 )
 {
     uint32_t v16;
-    uint8_t * p16 = (uint8_t*)&v16;
-    uint8_t i;
-    for (i=0;i<2;i++)
-    {
-        p16[1-i] = p14[i];
-    }
+
+    v16  = p14[0] << 8;
+    v16 |= p14[1];
+
     return v16 >> 2;
 }
 
 static uint32_t convert_24to32( const uint8_t * p24 )
 {
     uint32_t v32;
-    uint8_t * p32 = (uint8_t*)&v32;
-    uint8_t i;
-    for (i=0;i<3;i++)
-    {
-        p32[2-i] = p24[i];
-    }
-    p32[i] = 0;
+
+    v32  = p24[0] << 16;
+    v32 |= p24[1] << 8;
+    v32 |= p24[2];
+
     return v32;
 }
 
 static uint64_t convert_56to64( const uint8_t * p56 )
 {
-    uint64_t v64;
-    uint8_t * p64 = (uint8_t*)&v64;
-    uint8_t i;
-    for (i=0;i<7;i++)
-    {
-        p64[6-i] = p56[i];
-    }
-    p64[i] = 0;
-    return v64;
+    uint32_t msw, lsw;
+
+    msw  = p56[0] << 16;
+    msw |= p56[1] << 8;
+    msw |= p56[2];
+
+    lsw  = p56[3] << 24;
+    lsw |= p56[4] << 16;
+    lsw |= p56[5] << 8;
+    lsw |= p56[6];
+
+    return (uint64_t)msw << 32 | lsw;
 }
 
 int init_max34417(void)
@@ -185,7 +180,17 @@ bool max34417_bulk_voltage( double voltage[4] )
     for (i=0;i<4;i++)
     {
         adc = convert_14to16( &buf[1+i*2] );
-        voltage[i] = (double)adc * adc2v;
+#if defined(MAX78002EVKIT)
+		/* swap physical channels 1 and 2 for AI87 EVKit */
+        if (i == 1)
+            voltage[2] = (double)adc * adc2v;
+        else if (i == 2)
+            voltage[1] = (double)adc * adc2v;
+        else
+            voltage[i] = (double)adc * adc2v;
+#else
+		voltage[i] = (double)adc * adc2v;
+#endif
     }
     return true;
 }
@@ -194,6 +199,9 @@ bool max34417_bulk_energy( double energy_raw[4] )
 {
     uint8_t i;
     uint8_t cmd;
+#if defined(MAX78002EVKIT)
+    double raw;
+#endif
     static uint8_t buf[29];
 
     cmd = BULK_PWR_CMD;
@@ -203,8 +211,18 @@ bool max34417_bulk_energy( double energy_raw[4] )
 
     for (i=0;i<4;i++)
     {
-        energy_raw[i] = convert_56to64( &buf[1+i*7] );
-        //printf( "%g\n", energy_raw[i] );
+#if defined(MAX78002EVKIT)
+        /* swap physical channels 1 and 2 for AI87 EVKit */
+        raw = convert_56to64( &buf[1+i*7] );
+        if (i == 1)
+            energy_raw[2] = raw;
+        else if (i == 2)
+            energy_raw[1] = raw;
+        else
+            energy_raw[i] = raw;
+#else
+		energy_raw[i] = convert_56to64( &buf[1+i*7] );
+#endif
     }
     return true;
 }
@@ -218,9 +236,6 @@ bool max34417_bulk_power( double power_raw[4] )
     for (i=0;i<4;i++)
     {
         power_raw[i] = power_raw[i] / (double)acc_count;
-        //printf( "%g\n", power_raw[i] );
     }
     return true;
 }
-
-
