@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2016 Maxim Integrated Products, Inc., All Rights Reserved.
+ * Copyright (C) Maxim Integrated Products, Inc., All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -29,9 +29,6 @@
  * property whatsoever. Maxim Integrated Products, Inc. retains all
  * ownership rights.
  *
- * Description: Communications Device Class ACM (Serial Port) over USB
- * $Id: descriptors.h 29466 2017-08-18 15:25:56Z zach.metzinger $
- *
  *******************************************************************************
  */
 
@@ -40,7 +37,6 @@
 
 #include <stdint.h>
 #include "usb.h"
-#include "hid_kbd.h"
 
 usb_device_descriptor_t __attribute__((aligned(4))) device_descriptor = {
     0x12,         /* bLength = 18                     */
