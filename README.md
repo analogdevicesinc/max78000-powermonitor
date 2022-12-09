@@ -6,9 +6,13 @@ The EVKit is programmed with the Power Monitor Firmware during manufacture.  Bui
 
 #### Build
 
-This firmware can be built on Linux or on Windows using MinGW.  An ARM EABI toolchain is required and should be added to the PATH environment variable.  Alternatively on Windows, the Maxim 1.2.0 Low Power ARM Micro SDK contains a toolchain and can be obtained [here](https://www.maximintegrated.com/en/design/software-description.html/swpart=SFW0001500A).
+This firmware can be built using the Analog Devices MSDK toolchain:
 
-The target EVKit is specified by the makefile variable "EVKIT". Valid EVKIT values are "MAX78000" and "MAX78002".
+  * [Windows](https://www.analog.com/en/design-center/evaluation-hardware-and-software/software/software-download?swpart=SFW0010820A)
+  * [Ubuntu Linux](https://www.analog.com/en/design-center/evaluation-hardware-and-software/software/software-download?swpart=SFW0018720A)
+  * [macOS](https://www.analog.com/en/design-center/evaluation-hardware-and-software/software/software-download?swpart=SFW0018610A)
+
+The target EVKit is specified by the Makefile variable “EVKIT”. Valid EVKIT values are “MAX78000” and “MAX78002”.
 
 To build the MAX78002EVKit binary image:
 
@@ -18,4 +22,14 @@ The resulting binary can be found at *build/max32625_pmon_max78002evkit_if.bin*
 
 #### Flashing the Firmware
 
-The Power Monitor MCU contains a USB bootloader that will accept the firmware binary via a virtual USB flash drive.  To load a PMON firmware image, connect the dedicated PMON USB port (J1 on MAX78000EVIT, or CN1 on MAX78002EVKIT) to your PC and put the PMON MCU into boot loader mode by pressing the PWR MODE SEL LEFT pushbutton (SW6 on MAX78000EVKIT and SW2 on MAX78002EVKIT) while power cycling the board. Wait for 625 STATUS LED (D4 on MAX78000EVKIT, or D8 on MAX78002EVKIT) to illuminate. A virtual drive will appear on your host PC. Drag and drop the PMON firmware image onto the drive. Once the drive disappears, you may need to power cycle the board. The PMON firmware should display power information a second or two after reset.
+The Power Monitor MCU contains a USB bootloader that will accept the firmware binary via a virtual USB flash drive.
+
+To load a PMON firmware image:
+
+* Connect the dedicated PMON USB port (J1 on MAX78000EVIT, or CN1 on MAX78002EVKIT) to your computer.
+* Put the PMON MCU into boot loader mode by pressing the PWR MODE SEL LEFT pushbutton (SW6 on MAX78000EVKIT and SW2 on MAX78002EVKIT) while power cycling the board.
+* Wait for 625 STATUS LED (D4 on MAX78000EVKIT, or D8 on MAX78002EVKIT) to illuminate.
+* A virtual drive will appear on your host computer.
+* Drag and drop the PMON firmware image onto the drive.
+* Once the drive disappears, you may need to power cycle the board.
+* The PMON firmware should display power information a second or two after reset.
